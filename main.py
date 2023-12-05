@@ -1,24 +1,28 @@
 import os
-import asyncio
-from langchain.agents.openai_assistant import OpenAIAssistantRunnable
-from langchain.agents import Tool, initialize_agent, AgentType, load_tools
+
+from langchain.chains import LLMMathChain
+from langchain.llms import OpenAI
+from langchain.memory.prompt import ENTITY_MEMORY_CONVERSATION_TEMPLATE
+from langchain.tools.ddg_search import DuckDuckGoSearchRun
+from langchain.tools.human import HumanInputRun
+from langchain.utilities import SerpAPIWrapper, SQLDatabase
+from langchain.agents import Tool, AgentType, initialize_agent, load_tools
+from langchain.agents.openai_functions_multi_agent.base import OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
-from langchain.tools import DuckDuckGoSearchRun, E2BDataAnalysisTool, HumanInputRun
-from langchain.utilities.google_serper import GoogleSerperAPIWrapper
-from langchain_core.messages import SystemMessage
+from langchain.prompts import MessagesPlaceholder
+from langchain.memory import ConversationBufferMemory
+from Prompts.SystemPrompt import (super_prompt, default_context, conversation_prompt)
+import asyncio
 
-from Models.Model import event, contacts
-from Prompts.SystemPrompt import (super_prompt, default_context)
-from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
-
-os.environ["OPENAI_API_KEY"] = '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'
+os.environ["OPENAI_API_KEY"] = ''
 os.environ["SERPER_API_KEY"] = '29ce322a9d04ab78fc16d78f2caea4a40664670d'
-# os.environ["E2B_API_KEY"] = 'e2b_e13d23d507cf8b524363d563a0eec57be35019ff'
-search = GoogleSerperAPIWrapper()
-# DuckDuckGoSearchRun(),
-# tools = [Tool(name="Intermediate Answer", func=search.run, description="use for search in internet",)]
-memory = ConversationBufferMemory(memory_key="chat_history", input_key='input', output_key="output")
-# memory = ConversationBufferWindowMemory(memory_key="chat_history",input_key="input",output_key='output', return_messages=True, k=4)
+
+SUFFIX = """
+Here they are:
+{chat_history}
+Question: {input}
+{agent_scratchpad}
+"""
 
 def get_input() -> str:
     print("Insert your text. Enter 'q' or press Ctrl-D (or Ctrl-Z on Windows) to end.")
@@ -34,17 +38,26 @@ def get_input() -> str:
     return "\n".join(contents)
 
 async def newAgent():
+    llm = ChatOpenAI(temperature=0.5, model="gpt-4-1106-preview")
+
+    # tools = [DuckDuckGoSearchRun(), HumanInputRun(input_func=get_input)]
+    tools = load_tools(["google-serper", "dalle-image-generator"], llm=llm)
+
+    # Create the memory
+    memory = ConversationBufferMemory(memory_key="chat_history", input_key='input', output_key="output", return_messages=True)
+
+    # Create the agent
     agent_kwargs = {
-        'format_instructions': super_prompt
+        # "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
+        # 'prefix': conversation_prompt,
+        "format_instructions": conversation_prompt,
+        'suffix': SUFFIX
     }
 
-    llm = ChatOpenAI(temperature=0.5, model_name="gpt-4-1106-preview")
-    # tools = load_tools(["google-serper"], llm=llm)
-    tools = [DuckDuckGoSearchRun(), HumanInputRun(input_func=get_input)]
     agent_chain = initialize_agent(
         tools,
         llm,
-        agent=AgentType.OPENAI_FUNCTIONS,
+        agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
         verbose=True,
         agent_kwargs=agent_kwargs,
         memory=memory,
@@ -57,17 +70,14 @@ async def newAgent():
     print(response["output"])
 
     response = await agent_chain.ainvoke(
-        {"input": "What data do you need to create an event plan?"}
+        {"input": "Generate list of most possible answers to your requirements (max 6 rows). Rely on input"}
     )
     print(response["output"])
 
     response = await agent_chain.ainvoke(
-        {"input": "Please find me the best venue for my event and catering in internet"}
+        {"input": "Generate logo image for this event"}
     )
     print(response["output"])
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     asyncio.run(newAgent())
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
